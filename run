@@ -1,0 +1,7 @@
+#!/bin/sh
+
+set -eau pipefail
+
+javac -d bin -cp src src/hu/bacskai/school/gravity/GravityMain.java
+echo Compiled 1>&2
+java -cp bin hu.bacskai.school.gravity.GravityMain
