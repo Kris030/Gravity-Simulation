@@ -15,85 +15,8 @@ import javax.swing.JFrame;
 
 public class GravityMain {
 
-	private static void test() throws InterruptedException {
-		final int TPS = 100, FPS = 120;
-		final int Tick = 0, Render = 1;
-
-		int ticks = 0, renders = 0;
-
-		long tWait = Math.round(1_000_000_000.0 / TPS);
-		long rWait = Math.round(1_000_000_000.0 / FPS);
-
-		int nOP = Render;
-		long now = System.nanoTime();
-		long render_next = now;
-		long tick_next = now;
-
-		double secs = 5;
-		// long start = now;
-		long end = now + Math.round(secs * 1_000_000_000);
-
-		////
-		long nextOPT, margin = 750_000, s;
-		////
-
-		while (System.nanoTime() < end) {
-			switch (nOP) {
-				case Tick:
-					System.out.println("Tick " + ticks++);
-					// Thread.sleep(0, 1);
-
-					now = System.nanoTime();
-					tick_next = now + tWait;
-					break;
-
-				case Render:
-					
-					System.out.println("Render " + renders++);
-					// Thread.sleep(0, 1);
-
-					now = System.nanoTime();
-					render_next = now + rWait;
-					break;
-			}
-
-			// TODO: somehow prioritise ticks
-			if (tick_next <= render_next) {
-				nOP = Tick;
-				nextOPT = tick_next;
-			} else {
-				nOP = Render;
-				nextOPT = render_next;
-			}
-
-			now = System.nanoTime();
-			if (nextOPT <= now)
-				continue;
-			
-			s = nextOPT - now - margin;
-			if (s > margin && s > 0)
-				Utils.sleepNS(s);
-			
-			while (System.nanoTime() < nextOPT) {
-				for (int i = 0; i < 100; i++) {
-					
-				}
-			}
-		}
-
-		System.out.println("Overall TPS: " + ticks / secs + " tps vs expected: " + TPS);
-		System.out.println("Overall FPS: " + renders / secs + " fps vs expected: " + FPS);
-		System.out.println(tWait);
-		System.out.println(rWait);
-	}
-
 	public static void main(String[] args) {
-		try {
-			test();
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-		if (System.currentTimeMillis() < 0) init();
+		init();
 	}
 	
 	private static void onClose() {
@@ -175,16 +98,29 @@ public class GravityMain {
 		Simulation.initSimulation();
 		Rendering.initRendering();
 
+		startMS = System.currentTimeMillis();
+		startNS = System.nanoTime();
 		loop();
 	}
-	
-	private static int currentFPS = -1;
+	private static long startMS, startNS;
+	private static double SDT;
+	private static long NSDT;
+	public static long getStart() {
+		return startMS;
+	}
+	public static long getNSPassed() {
+		return NSDT;
+	}
+	public static double getSPassed() {
+		return SDT;
+	}
+
+	public static final int targetTPS = 100, targetFPS = 120;
 	private static void loop() {
-		final int targetTPS = 100, targetFPS = 30;
 
 		/* V1
-		// final double nsPTick = Math.round(1_000_000_000.0 / targetTPS);
-		final double nsPFrame = Math.round(1_000_000_000.0 / targetFPS);
+		// final double nsPTick = Math.round(1_000_000_000d / targetTPS);
+		final double nsPFrame = Math.round(1_000_000_000d / targetFPS);
 		
 		running = true;
 		while (running) {
@@ -232,59 +168,72 @@ public class GravityMain {
 
 		/* */
 
-		long nsBTWtick = Math.round(1_000_000_000.0 / targetTPS);
-		long nsBTWframe = Math.round(1_000_000_000.0 / targetFPS);
+		long nsBTWtick = Math.round(1_000_000_000d / targetTPS);
+		long nsBTWframe = Math.round(1_000_000_000d / targetFPS);
 
-		// long start = System.nanoTime();
-		
-		long lastTick = System.nanoTime();
-		long lastFrame = lastTick;
-
-		// start one frame ahead
-		long nextTick = lastTick + nsBTWtick;
-		long nextFrame = lastFrame;
-
-		
 		final byte TICK = 0, RENDER = 1;
+		// start with a render to show stuff earlier
 		byte next = RENDER;
 		
+		// start one frame ahead
+		long nextTick = 0, nextFrame = -1;
+		long nextAction, now, wait;
+
+		final long margin = 100_000;
+
 		running = true;
 		while (running) {
+			
+			now = System.nanoTime();
 			if (next == TICK) {
-				Input.processInput();
-				Simulation.tick();
-			} else
-				Rendering.render(1);
-			
-			Input.afterProcessing();
-
-			long now = System.nanoTime();
-
-			if (next == TICK)
 				nextTick = now + nsBTWtick;
-			else
+
+				Input.processInput();
+				NSDT = now - startNS;
+				SDT = NSDT / 1_000_000_000d;
+				Simulation.tick();
+				Input.afterProcessing();
+
+			} else {
 				nextFrame = now + nsBTWframe;
+
+				Rendering.render(1);
+			}
 			
-			long ns;
 			if (nextTick <= nextFrame) {
 				next = TICK;
-				ns = nsBTWtick;
+				nextAction = nextTick;
 			} else {
 				next = RENDER;
-				ns = nsBTWframe;
+				nextAction = nextFrame;
 			}
 
-			try {
-				Utils.sleepNS(ns);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
+			now = System.nanoTime();
+
+			// if we're already behind, don't wait
+			// TODO: skip the next frame if needed
+			wait = nextAction - now;
+			if (wait <= 0)
+				continue;
+			
+			// if we have more time than the busy
+			// wait margin do a regular sleep
+			wait -= margin;
+			if (wait > 0) {
+				try {
+					Utils.sleepNS(wait);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+					break;
+				}
+			} else
+				wait += margin;
+			
+			// do the rest of the waiting busily
+			while (System.nanoTime() < nextAction);
 		}
 
 		afterLoop();
 	}
 
-	public static int getCurrentFPS() {
-		return currentFPS;
-	}
 }
